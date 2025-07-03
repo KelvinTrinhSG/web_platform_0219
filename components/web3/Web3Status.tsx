@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { polygon } from 'wagmi/chains';
+import React, { useEffect, useRef, useState } from 'react';
+import { polygon, linea, bsc } from 'wagmi/chains';
 import { Platform } from '@/constants';
 import { useRouter } from 'next/router';
 import Button from '@/components/button';
@@ -17,42 +17,62 @@ import PosterButton from '@/components/poster/PosterButton';
 import { useAccount, useNetwork, useSwitchNetwork } from 'wagmi';
 import { useSignInWithEthereum } from '@/hooks/useSignInWithEthereum';
 import { accessTokenAtom } from '@/store/user/state';
+import { getLastConnectedWallet } from '@/hooks/user';
+import { useConnect } from 'wagmi';
 
 function Web3Status() {
   const router = useRouter();
-  const { chain } = useNetwork();
   const isMounted = useIsMounted();
   const { mutate } = useMutationLogin();
-  const { address } = useAccount();
+  const { address, isConnected } = useAccount();
+  const { chain } = useNetwork();
+  const { switchNetwork } = useSwitchNetwork();
+  const { connect, connectors } = useConnect();
+
   const setAccessToken = useSetRecoilState(accessTokenAtom);
   const unwatchAccount = useRef<() => void>();
+  const [isConnecting, setIsConnecting] = useState(false); // ✅ Loading state
+  const [isOpen, setIsOpen] = useRecoilState(isConnectPopoverOpen);
+  const posterCapture = useRecoilValue(posterCaptureAtom);
+
+  const supportedNetworks = [polygon, linea, bsc]; // ✅ Supported networks
+  const isNetworkSupported = supportedNetworks.some((network) => network.id === chain?.id);
+
   const { signInWithEthereum } = useSignInWithEthereum({
     onSuccess: (args) => mutate({ ...args, platform: Platform.USER }),
   });
-  const { isConnected } = useAccount({
-    onConnect({ address, isReconnected }) {
-      unwatchAccount.current = watchAccount(({ isConnected, address }) => {
-        const accessToken = getAccessToken({ address });
-        if (address && isConnected && !accessToken) {
-          signInWithEthereum(address).then();
-        }
-      });
-      if (isReconnected || !address) return;
-      signInWithEthereum(address).then();
-    },
-    onDisconnect() {
-      unwatchAccount.current?.();
-    },
-  });
-  const { switchNetwork } = useSwitchNetwork({ chainId: polygon.id });
-
-  const [isOpen, setIsOpen] = useRecoilState(isConnectPopoverOpen);
-  const posterCapture = useRecoilValue(posterCaptureAtom);
 
   useEffect(() => {
     const accessToken = getAccessToken({ address });
     setAccessToken(accessToken);
   }, [address, setAccessToken]);
+
+  useEffect(() => {
+    const lastWalletId = getLastConnectedWallet();
+    if (!lastWalletId) return;
+
+    const connector = connectors.find((c) => c.id === lastWalletId);
+    if (connector) {
+      setIsConnecting(true); // ✅ Optional UX
+      connect({ connector }).catch(() => setIsConnecting(false));
+    }
+  }, [connect, connectors]);
+
+  useAccount({
+    onConnect({ address, isReconnected }) {
+      unwatchAccount.current = watchAccount(({ isConnected, address }) => {
+        const accessToken = getAccessToken({ address });
+        if (address && isConnected && !accessToken) {
+          signInWithEthereum(address).then(() => setIsConnecting(false));
+        }
+      });
+      if (isReconnected || !address) return;
+      signInWithEthereum(address).then(() => setIsConnecting(false));
+    },
+    onDisconnect() {
+      unwatchAccount.current?.();
+    },
+  });
 
   if (!isMounted) return null;
 
@@ -61,32 +81,51 @@ function Web3Status() {
   }
 
   if (isConnected) {
-    if (chain?.unsupported) {
+    if (!isNetworkSupported) {
       return (
-        <Button size="small" type="error" className="h-10" onClick={() => switchNetwork?.()}>
-          Wrong Network
-        </Button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-red-500">Wrong Network</span>
+          <Button size="small" type="error" className="h-10" onClick={() => switchNetwork?.(polygon.id)}>
+            Switch to Polygon
+          </Button>
+        </div>
       );
     }
+
     return (
-      <div className="flex items-center">
+      <div className="flex items-center gap-2">
         {router.pathname === '/gamer' && posterCapture && <PosterButton />}
         <div className="flex rounded-full bg-[#44465F]/60 text-sm">
           <Web3StatusInner />
         </div>
-      </div>
-    );
-  } else {
-    return (
-      <div>
-        <Popover open={isOpen} onOpenChange={(op) => setIsOpen(op)} render={({ close }) => <WalletPopover close={close} />}>
-          <Button size="small" type="gradient" className="h-10 w-[120px]">
-            Connect
-          </Button>
-        </Popover>
+        <span className="text-xs text-green-400">Connected: {chain?.name}</span>
       </div>
     );
   }
+
+  return (
+    <div>
+      <Popover
+        open={isOpen}
+        onOpenChange={(op) => {
+          setIsOpen(op);
+          if (op) setIsConnecting(true);
+        }}
+        render={({ close }) => (
+          <WalletPopover
+            close={() => {
+              setIsConnecting(false);
+              close();
+            }}
+          />
+        )}
+      >
+        <Button size="small" type="gradient" className="h-10 w-[120px]" disabled={isConnecting}>
+          {isConnecting ? 'Connecting...' : 'Connect'}
+        </Button>
+      </Popover>
+    </div>
+  );
 }
 
 export default Web3Status;

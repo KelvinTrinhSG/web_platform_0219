@@ -21,6 +21,25 @@ import { useFetchUserNotSubmittedList, useMutationUserSubmittedList } from './da
 import { useFetchArcanaInvitationInfo } from './dashboard/referral';
 import { useMutationTasksStatus } from './dashboard/task';
 
+// ✅ Connection Persistence: Save last connected wallet
+export const saveConnectionState = (connectorId: string) => {
+  try {
+    localStorage.setItem('lastConnectedWallet', connectorId);
+  } catch (error) {
+    console.error('Error saving connection state:', error);
+  }
+};
+
+// ✅ Connection Persistence: Get last connected wallet
+export const getLastConnectedWallet = (): string | null => {
+  try {
+    return localStorage.getItem('lastConnectedWallet');
+  } catch (error) {
+    console.error('Error reading connection state:', error);
+    return null;
+  }
+};
+
 export const useMutationLogin = () => {
   const setUserInfo = useSetRecoilState(userInfoAtom);
   const setAccessTokenAtom = useSetRecoilState(accessTokenAtom);
